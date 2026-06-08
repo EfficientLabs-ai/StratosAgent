@@ -22,6 +22,7 @@ import path from 'node:path';
 import { ReceiptLog, makeReceiptVerifier, makeReceiptSigner, verifyBundle } from '../ledger/capability-receipt.js';
 import { originId } from '../memory/skill-seal.js';
 import { route as routeDecision, difficulty } from '../routing/model-router.js';
+import { selectAndComplete } from '../routing/model-adapter.js';
 import { parseCapabilities, assertStepAllowed } from '../security/capability-gate.js';
 import { importSkillMd, exportSkillMd } from '../skills/skill-md.js';
 import { SkillStore } from '../skills/skill-store.js';
@@ -32,6 +33,14 @@ import { evaluate as evaluateTrace } from '../eval/eval-engine.js';
 import { generateHybridKeyPair } from '../security/quantum-crypto.js';
 
 const C = { g: '\x1b[32m', y: '\x1b[33m', r: '\x1b[31m', b: '\x1b[36m', d: '\x1b[2m', x: '\x1b[0m', B: '\x1b[1m' };
+
+// The local sovereign gateway (OpenAI-compatible). Overridable via --gateway / STRATOS_GATEWAY_URL.
+const DEFAULT_GATEWAY = 'http://127.0.0.1:4099/v1/chat/completions';
+// Read a `--name value` flag from an argv slice (value must not itself be a flag).
+const getArgVal = (arr, name) => {
+  const i = arr.indexOf('--' + name);
+  return i >= 0 && arr[i + 1] != null && !String(arr[i + 1]).startsWith('--') ? arr[i + 1] : undefined;
+};
 
 const _ROOT = path.resolve(process.cwd());
 const shortHash = (h) => (h ? String(h).slice(0, 12) : '—');
@@ -64,9 +73,11 @@ function helpText() {
     banner(),
     `${C.B}stratos${C.x} ${C.d}— the publicly-auditable operating core${C.x}`,
     '',
+    `  ${C.g}init${C.x}      [workspace]                   set up this node: persistent identity + a workspace`,
     `  ${C.g}workspace${C.x} create|tree <name>           the files-first operational unit`,
     `  ${C.g}task${C.x}      create <ws/proj/wf/task>      scaffold a task (8 canonical entries)`,
     `  ${C.g}capture${C.x}   <ws/proj/wf/task> "<text>"    classify + persist a context record (deterministic)`,
+    `  ${C.g}complete${C.x}  <ws/proj/wf/task> "<prompt>"  REAL local completion via your gateway + signed receipt`,
     `  ${C.g}trace${C.x}     <ws/proj/wf/task>             start→steps→end with a signed receipt spine`,
     `  ${C.g}eval${C.x}      <ws/proj/wf/task>             score a trace against the deterministic rubric`,
     `  ${C.g}skill${C.x}     import|export|list            SKILL.md portability (untrusted-by-default)`,
@@ -532,8 +543,130 @@ async function cmdReceipt(rest, d = {}) {
   return { code: 1, lines: [`${C.r}Unknown receipt subcommand: ${sub}${C.x}`, `${C.d}Try: verify${C.x}`] };
 }
 
+// ── init — establish this node's identity + a default workspace (front of the golden path) ───────
+function cmdInit(rest, d = {}) {
+  if (rest[0] === 'help' || rest[0] === '-h' || rest[0] === '--help') {
+    return { code: 0, lines: [
+      `${C.B}stratos init${C.x} ${C.d}— set up this node: a persistent identity + a default workspace${C.x}`,
+      `  ${C.g}stratos init [workspace]${C.x} ${C.d}(default workspace name: local)${C.x}`,
+    ] };
+  }
+  const root = d.workspacesRoot;
+  const wt = d.workspaceTree || workspaceTree;
+  const ws = rest[0] && !rest[0].startsWith('-') ? rest[0] : 'local';
+  // Persistent node identity — the receipt signer/verifier (private key is gitignored).
+  const keyPair = d.traceKeyPair || loadOrCreateNodeKeys();
+  const nodeId = originId(keyPair.publicKey);
+  // A default workspace so a task can be run immediately (idempotent — ignore "already exists").
+  try { wt.createWorkspace(ws, root ? { root } : {}); } catch { /* exists — fine */ }
+  return { code: 0, lines: [
+    `${C.g}✓ StratosAgent initialized${C.x}`,
+    `  ${C.d}node      ${C.x}${didShort(nodeId)}`,
+    `  ${C.d}keys      ${C.x}${nodeKeysPath()} ${C.d}(private — gitignored)${C.x}`,
+    `  ${C.d}workspace ${C.x}${ws}`,
+    `  ${C.d}next      ${C.x}stratos task create ${ws}/demo/flow/t1  ·  stratos complete ${ws}/demo/flow/t1 "your prompt"`,
+  ] };
+}
+
+// ── complete — a REAL local completion through the sovereign gateway, traced + signed + verified ─
+async function cmdComplete(rest, d = {}) {
+  if (!rest.length || rest[0] === 'help' || rest[0] === '-h' || rest[0] === '--help') {
+    return { code: rest.length ? 0 : 1, lines: [
+      `${C.B}stratos complete${C.x} ${C.d}— run a real local completion through your gateway, with a signed receipt${C.x}`,
+      `  ${C.g}stratos complete <ws/proj/wf/task> "<prompt>"${C.x} ${C.d}[--model gemma2:2b] [--gateway URL] [--class general]${C.x}`,
+      '',
+      `  ${C.d}Routes the request (local-default), calls the OpenAI-compatible gateway, writes a trace +${C.x}`,
+      `  ${C.d}a PQC-signed capability-receipt, and verifies it. Default gateway: ${DEFAULT_GATEWAY}${C.x}`,
+    ] };
+  }
+  const caps = d.workspaceCaps || WORKSPACE_CAPS;
+  try { assertStepAllowed(caps, { action: 'trace.write' }); }
+  catch (e) { return { code: 1, lines: [`${C.r}${e.message}${C.x}`] }; }
+
+  const root = d.workspacesRoot;
+  const wt = d.workspaceTree || workspaceTree;
+  const taskPath = rest[0];
+  const prompt = rest[1] && !String(rest[1]).startsWith('--') ? String(rest[1]) : '';
+  if (!prompt) return { code: 1, lines: [`${C.r}usage: stratos complete <ws/proj/wf/task> "<prompt>"${C.x}`] };
+
+  const gw = getArgVal(rest, 'gateway') || process.env.STRATOS_GATEWAY_URL || DEFAULT_GATEWAY;
+  const model = getArgVal(rest, 'model') || process.env.STRATOS_LOCAL_MODEL || 'gemma2:2b';
+  const classHint = getArgVal(rest, 'class') || 'general';
+  const fetchFn = d.fetch || globalThis.fetch;
+
+  let tnode;
+  try { tnode = wt.resolveTask(taskPath, root ? { root } : {}); }
+  catch (e) { return { code: 1, lines: [
+    `${C.r}${e.message}${C.x}`,
+    `${C.d}run ${C.g}stratos init${C.x}${C.d}, then ${C.g}stratos task create ${taskPath}${C.x}${C.d} first.${C.x}`,
+  ] }; }
+  const taskId = tnode.subtask || tnode.task;
+
+  // The local provider — the ACTUAL network call lives here (per model-adapter's contract). The
+  // router/adapter decide IF and WHO (local-default, $0); this provider does the gateway request.
+  const localProvider = {
+    id: 'local-gateway', kind: 'openweight', costClass: 'local', capability: 3,
+    async call(req) {
+      const res = await fetchFn(gw, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model, messages: [{ role: 'user', content: req.prompt }], stream: false }),
+      });
+      if (!res.ok) return { ok: false, error: `gateway HTTP ${res.status}` };
+      const j = await res.json();
+      return { ok: true, text: String(j?.choices?.[0]?.message?.content ?? ''), model: j?.model || model, usage: j?.usage || null };
+    },
+  };
+
+  let out;
+  try {
+    out = await (d.selectAndComplete || selectAndComplete)({
+      task: { prompt, model, kind: classHint }, classHint, providers: [localProvider], ctx: { meshAvailable: false },
+    });
+  } catch (e) { return { code: 1, lines: [`${C.r}completion failed: ${e.message}${C.x}`, `${C.d}is the gateway up at ${gw}?${C.x}`] }; }
+  const completion = out.result.text || '';
+
+  // Persist the completion as a durable task output.
+  const outFile = path.join(tnode.dirs.outputs, `${taskId}.completion.txt`);
+  try { fs.mkdirSync(tnode.dirs.outputs, { recursive: true }); fs.writeFileSync(outFile, completion + '\n'); } catch { /* non-fatal */ }
+
+  // Trace + sign the run → a tamper-evident, publicly-verifiable capability-receipt.
+  const keyPair = d.traceKeyPair || loadOrCreateNodeKeys();
+  const nodeId = originId(keyPair.publicKey);
+  const start = d.startTrace || startTrace;
+  const step = d.recordStep || recordStep;
+  const end = d.endTrace || endTrace;
+  const receiptFile = path.join(tnode.dirs.traces, `${taskId}.receipt.jsonl`);
+  if (!d.traceReceiptLog) { try { fs.rmSync(receiptFile, { force: true }); } catch { /* none yet */ } }
+
+  let res, vok = null, receiptId = '';
+  try {
+    const h = start({ task: taskPath, model_used: model, model_class: 'openweight', root, now: d.traceNow });
+    step(h, { kind: 'model', summary: 'local completion via gateway', who: nodeId, model, permission: 'model.call', input: prompt, output: completion, cost_units: 1 });
+    const log = d.traceReceiptLog || new (d.ReceiptLog || ReceiptLog)({
+      path: receiptFile, signer: makeReceiptSigner(keyPair.privateKey), verifier: makeReceiptVerifier(keyPair.publicKey), nodeId, now: d.traceNow,
+    });
+    res = end(h, { result: 'ok', outputs: [outFile], receiptLog: log, actor_id: nodeId, now: d.traceNow });
+    const v = res.receipt ? log.verify({ requireSig: true }) : { ok: null };
+    vok = v.ok; receiptId = res.receipt ? shortHash(res.receipt.hash) : '';
+  } catch (e) { return { code: 1, lines: [`${C.r}trace/receipt failed: ${e.message}${C.x}`] }; }
+
+  return { code: 0, lines: [
+    `${C.g}✓ completion${C.x} ${C.d}· ${out.tier} · $0 · ${out.reason}${C.x}`,
+    `  ${C.d}model   ${C.x}${out.result.model || model}${out.result.usage && out.result.usage.total_tokens != null ? C.d + ` · ${out.result.usage.total_tokens} tok` + C.x : ''}`,
+    '',
+    completion.trim(),
+    '',
+    `  ${C.d}output  ${C.x}${outFile}`,
+    `  ${C.d}trace   ${C.x}${res.file}`,
+    receiptId
+      ? `  ${C.d}receipt ${C.x}${receiptId} ${vok === true ? C.g + '✓ verified (public key only)' + C.x : C.r + '✗ verify failed' + C.x}`
+      : `  ${C.y}no receipt minted${C.x}`,
+  ] };
+}
+
 /** The public command surface. */
-export const COMMANDS = ['workspace', 'task', 'capture', 'trace', 'eval', 'skill', 'route', 'receipt', 'version', 'help'];
+export const COMMANDS = ['init', 'workspace', 'task', 'capture', 'complete', 'trace', 'eval', 'skill', 'route', 'receipt', 'version', 'help'];
 
 export async function run(argv = [], deps = {}) {
   const d = {
@@ -563,6 +696,9 @@ export async function run(argv = [], deps = {}) {
     readTrace: deps.readTrace,
     evalPublicKeyBundle: deps.evalPublicKeyBundle,
     evalNow: deps.evalNow,
+    // complete (real local completion through the gateway)
+    fetch: deps.fetch,
+    selectAndComplete: deps.selectAndComplete,
   };
   const [cmd, ...rest] = argv;
   switch (cmd) {
@@ -570,8 +706,10 @@ export async function run(argv = [], deps = {}) {
     case 'help': case '--help': case '-h': case undefined: return { code: 0, lines: helpText() };
     case 'skill': return cmdSkill(rest, d);
     case 'workspace': case 'ws': return cmdWorkspace(rest, d);
+    case 'init': return cmdInit(rest, d);
     case 'task': return cmdTask(rest, d);
     case 'capture': return cmdCapture(rest, d);
+    case 'complete': return cmdComplete(rest, d);
     case 'trace': return cmdTrace(rest, d);
     case 'eval': return cmdEval(rest, d);
     case 'route': return cmdRoute(rest);
