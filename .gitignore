@@ -6,3 +6,8 @@ node_modules/
 *.pat
 .secrets-vault/
 .DS_Store
+
+# Local agent state + private node identity — NEVER commit (holds the private key).
+.stratos-profile/
+node-keys.json
+*-keys.json

@@ -320,15 +320,27 @@ function cmdTrace(rest, d = {}) {
   const start = d.startTrace || startTrace;
   const step = d.recordStep || recordStep;
   const end = d.endTrace || endTrace;
-  const keyPair = d.traceKeyPair || generateHybridKeyPair();
+  // Persistent node identity: load (or create) the node keypair so a SEPARATE
+  // `stratos eval` process can verify this receipt with the public key alone.
+  // Tests still inject d.traceKeyPair to stay hermetic (no on-disk keys).
+  const keyPair = d.traceKeyPair || loadOrCreateNodeKeys();
   const nodeId = originId(keyPair.publicKey);
 
   let h, res;
   try {
+    const wt = d.workspaceTree || workspaceTree;
+    const tnode = wt.resolveTask(taskPath, root ? { root } : {});
+    const taskId = tnode.subtask || tnode.task;
+    // Persist the receipt beside the trace so `stratos eval` (a separate run) can
+    // load + verify it. Fresh per trace — the trace is the final record (overwrite).
+    const receiptFile = path.join(tnode.dirs.traces, `${taskId}.receipt.jsonl`);
+    if (!d.traceReceiptLog) { try { fs.rmSync(receiptFile, { force: true }); } catch {} }
+
     h = start({ task: taskPath, model_used: d.traceModel || 'gemma2:2b', model_class: 'openweight', root, now: d.traceNow });
     step(h, { kind: 'plan', summary: 'plan the task', who: nodeId, model: 'gemma2:2b', permission: 'plan' });
     step(h, { kind: 'io', summary: 'write an output', who: nodeId, model: 'gemma2:2b', permission: 'fs.write', input: taskPath, output: 'done', cost_units: 1 });
     const log = d.traceReceiptLog || new (d.ReceiptLog || ReceiptLog)({
+      path: receiptFile,
       signer: makeReceiptSigner(keyPair.privateKey),
       verifier: makeReceiptVerifier(keyPair.publicKey),
       nodeId, now: d.traceNow,
@@ -359,6 +371,32 @@ function loadNodePublicBundle(kf) {
     const raw = JSON.parse(fs.readFileSync(kf, 'utf8'));
     return Object.fromEntries(Object.entries(raw.publicKey).map(([k, v]) => [k, Buffer.from(v, 'base64')]));
   } catch { return null; }
+}
+
+/**
+ * Load the persistent node keypair from disk, creating + saving it on first use.
+ * This is what makes the trace→receipt→eval loop work ACROSS processes: `trace`
+ * signs with a stable key, and `eval` (a later, separate run) verifies the
+ * receipt with the matching PUBLIC key via loadNodePublicBundle(nodeKeysPath()).
+ * Keys serialize as base64 DER bundles — the exact shape loadNodePublicBundle
+ * expects. The private key file is written 0600 (best effort).
+ */
+function loadOrCreateNodeKeys(kf = nodeKeysPath()) {
+  const toBundle = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, Buffer.from(v, 'base64')]));
+  if (fs.existsSync(kf)) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(kf, 'utf8'));
+      if (raw && raw.publicKey && raw.privateKey) {
+        return { publicKey: toBundle(raw.publicKey), privateKey: toBundle(raw.privateKey) };
+      }
+    } catch { /* corrupt → regenerate below */ }
+  }
+  const kp = generateHybridKeyPair();
+  const ser = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, Buffer.from(v).toString('base64')]));
+  fs.mkdirSync(path.dirname(kf), { recursive: true });
+  fs.writeFileSync(kf, JSON.stringify({ publicKey: ser(kp.publicKey), privateKey: ser(kp.privateKey) }, null, 2) + '\n');
+  try { fs.chmodSync(kf, 0o600); } catch { /* non-posix */ }
+  return kp;
 }
 
 function cmdEval(rest, d = {}) {
