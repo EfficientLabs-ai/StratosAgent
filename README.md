@@ -7,6 +7,9 @@
 ### The publicly-auditable core of a sovereign, local-first AI agent.
 
 <p>
+<a href="https://github.com/EfficientLabs-ai/StratosAgent/actions/workflows/ci.yml"><img src="https://github.com/EfficientLabs-ai/StratosAgent/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+</p>
+<p>
 <img src="https://img.shields.io/badge/license-BSL%201.1-2e8bff?style=for-the-badge" alt="License" />
 <img src="https://img.shields.io/badge/tests-137%20hermetic-22c55e?style=for-the-badge" alt="Tests" />
 <img src="https://img.shields.io/badge/runs-on%20your%20metal-0b0b0f?style=for-the-badge" alt="Local-first" />
@@ -58,26 +61,37 @@ npm install        # one dependency: @noble/post-quantum (audited, FIPS 203/204)
 npm test           # 10 hermetic suites, all green
 ```
 
-Then drive the operating core end to end — capture → trace → eval — entirely on your machine:
+Then drive the operating core end to end — capture → trace → eval — entirely on your machine.
+These commands are identical in **PowerShell, cmd, bash, and zsh**:
 
 ```sh
-export STRATOS_WORKSPACES_DIR=./my-workspaces
-
 node bin/stratos.js workspace create demo
 node bin/stratos.js task create demo/proj/flow/t1
 node bin/stratos.js capture demo/proj/flow/t1 "how do I verify a receipt?"
-node bin/stratos.js trace demo/proj/flow/t1     # writes a trace + a PQC-signed receipt
-node bin/stratos.js eval  demo/proj/flow/t1     # scores it against the deterministic rubric
+node bin/stratos.js trace demo/proj/flow/t1
+node bin/stratos.js eval  demo/proj/flow/t1
 ```
 
-```
-✓ trace written ./my-workspaces/demo/proj/flow/t1/traces/t1.json
+**You'll see** the output below — this is what the program *prints*, not commands to run:
+
+```text
+✓ trace written .../demo/proj/flow/t1/traces/t1.json
   steps   2 · result ok
-  node    did:atmos:199d0988c298…d92388
-  receipt 2149c863c163 ✓ verified (public key only)
+  node    did:atmos:e3d384e72263…ad4d51
+  receipt a536a04b62de ✓ verified (public key only)
+
+✓ eval PASS t1 · 6/6 (100%)
+  ✓ result-ok        ✓ no-error-steps     ✓ outputs-present
+  ✓ cost-within-budget                    ✓ trace-integrity (receipt verifies: chain + signature + input-hash)
 ```
+
+By default everything lands under `./.stratos-profile/workspaces`. To put it elsewhere, set
+`STRATOS_WORKSPACES_DIR` first — **bash/zsh:** `export STRATOS_WORKSPACES_DIR=./my-workspaces` · **PowerShell:** `$env:STRATOS_WORKSPACES_DIR="./my-workspaces"`.
 
 No model was called. No byte left your machine. The trace, the receipt, and the eval are files you own.
+
+> 🌐 Looking for `mesh-node.mjs` / `node-runner`? That's the P2P mesh — it lives in the separate
+> [**The Atmosphere**](https://github.com/EfficientLabs-ai/TheAtmosphere) repo, not here.
 
 ---
 
