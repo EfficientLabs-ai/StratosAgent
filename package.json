@@ -35,7 +35,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "for t in test-operating-core test-operating-tap test-eval-engine test-icm-workspace test-skill-seal test-skill-md test-capability-gate test-model-router test-model-adapter test-mesh-signal; do echo \"── $t ──\"; node $t.mjs || exit 1; done",
+    "test": "node run-tests.mjs",
     "demo": "node bin/stratos.js route \"summarize this file\""
   },
   "engines": {
