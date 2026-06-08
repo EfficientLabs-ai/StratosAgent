@@ -1,0 +1,47 @@
+{
+  "name": "stratos-agent",
+  "version": "1.0.0",
+  "description": "StratosAgent — the publicly-auditable operating core of a sovereign, local-first AI agent: files-first workspace/context/trace/eval, a publicly verifiable capability-receipt format + verifier, signed-skill (SKILL.md) verify-before-run, and a local-default model router.",
+  "type": "module",
+  "license": "BUSL-1.1",
+  "author": "Efficient Labs",
+  "homepage": "https://efficientlabs.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EfficientLabs-ai/StratosAgent.git"
+  },
+  "bin": {
+    "stratos": "bin/stratos.js"
+  },
+  "exports": {
+    "./cli": "./src/cli/stratos-cli.js",
+    "./workspace": "./src/workspace/workspace-tree.js",
+    "./context": "./src/context/context-capture.js",
+    "./trace": "./src/trace/trace-engine.js",
+    "./eval": "./src/eval/eval-engine.js",
+    "./receipt": "./src/ledger/capability-receipt.js",
+    "./skill-seal": "./src/memory/skill-seal.js",
+    "./skill-md": "./src/skills/skill-md.js",
+    "./router": "./src/routing/model-router.js",
+    "./adapter": "./src/routing/model-adapter.js",
+    "./capability-gate": "./src/security/capability-gate.js",
+    "./crypto": "./src/security/quantum-crypto.js"
+  },
+  "files": [
+    "src/",
+    "bin/",
+    "docs/",
+    "*.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "for t in test-operating-core test-operating-tap test-eval-engine test-icm-workspace test-skill-seal test-skill-md test-capability-gate test-model-router test-model-adapter test-mesh-signal; do echo \"── $t ──\"; node $t.mjs || exit 1; done",
+    "demo": "node bin/stratos.js route \"summarize this file\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@noble/post-quantum": "^0.6.1"
+  }
+}
