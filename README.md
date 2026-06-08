@@ -11,7 +11,7 @@
 </p>
 <p>
 <img src="https://img.shields.io/badge/license-BSL%201.1-2e8bff?style=for-the-badge" alt="License" />
-<img src="https://img.shields.io/badge/tests-137%20hermetic-22c55e?style=for-the-badge" alt="Tests" />
+<img src="https://img.shields.io/badge/tests-145%20hermetic-22c55e?style=for-the-badge" alt="Tests" />
 <img src="https://img.shields.io/badge/runs-on%20your%20metal-0b0b0f?style=for-the-badge" alt="Local-first" />
 <img src="https://img.shields.io/badge/crypto-post--quantum-8b5cf6?style=for-the-badge" alt="Post-Quantum" />
 </p>
@@ -45,7 +45,7 @@ The private **learning/economic flywheel** (how the agent compounds skills and a
 the private connector/broker internals are **not** in this repo, by design — see
 [`STATE_OF_REALITY.md`](STATE_OF_REALITY.md). What *is* here is real, and the tests prove it.
 
-> Run `npm test` — **137 hermetic assertions across 10 suites**, no network and no LLM required. If any
+> Run `npm test` — **145 hermetic assertions across 11 suites**, no network and no LLM required. If any
 > claim below breaks, a test goes red.
 
 ---
@@ -58,7 +58,7 @@ Everything here is deterministic and local. No key, no account, no meter.
 git clone https://github.com/EfficientLabs-ai/StratosAgent.git
 cd StratosAgent
 npm install        # one dependency: @noble/post-quantum (audited, FIPS 203/204)
-npm test           # 10 hermetic suites, all green
+npm test           # 11 hermetic suites, all green
 ```
 
 Then drive the operating core end to end — capture → trace → eval — entirely on your machine.
