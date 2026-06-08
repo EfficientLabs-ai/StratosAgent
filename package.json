@@ -39,7 +39,7 @@
     "demo": "node bin/stratos.js route \"summarize this file\""
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19.0"
   },
   "dependencies": {
     "@noble/post-quantum": "^0.6.1"
