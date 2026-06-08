@@ -50,6 +50,35 @@ the private connector/broker internals are **not** in this repo, by design — s
 
 ---
 
+## Install
+
+```sh
+# macOS / Linux:
+curl -fsSL https://efficientlabs.ai/install.sh | sh
+# Windows (PowerShell):
+irm https://efficientlabs.ai/install.ps1 | iex
+# or with npm, any OS:
+npm i -g @efficientlabs/stratos
+```
+
+Set up your node, then run a **real local completion**. `complete` needs a local,
+OpenAI-compatible endpoint — e.g. [Ollama](https://ollama.com) (`ollama serve` + `ollama pull
+gemma2:2b`) or any gateway — pointed at via `--gateway` / `STRATOS_GATEWAY_URL`. No model is
+bundled; you bring the endpoint and your data stays on your machine.
+
+```sh
+stratos init
+stratos task create local/demo/flow/t1
+STRATOS_GATEWAY_URL=http://127.0.0.1:11434/v1/chat/completions \
+  stratos complete local/demo/flow/t1 "In one sentence, what is sovereign AI?" --model gemma2:2b
+stratos eval local/demo/flow/t1     # re-verifies the run's signed receipt
+```
+
+The completion is routed **local-default ($0)**, written as a trace, and sealed in a PQC-signed
+capability-receipt that verifies with the **public key only**.
+
+---
+
 ## Prove it #1 — the $0 operating loop (no API, no network)
 
 Everything here is deterministic and local. No key, no account, no meter.
