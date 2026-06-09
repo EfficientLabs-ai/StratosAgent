@@ -30,7 +30,6 @@
   "files": [
     "src/",
     "bin/",
-    "docs/",
     "*.md",
     "LICENSE"
   ],
