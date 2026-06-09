@@ -200,9 +200,9 @@ Full detail: [`STATE_OF_REALITY.md`](STATE_OF_REALITY.md).
 Import the engines directly, too — the package exposes clean entrypoints:
 
 ```js
-import { run } from 'stratos-agent/cli';
-import { verifyBundle } from 'stratos-agent/receipt';
-import { route } from 'stratos-agent/router';
+import { run } from '@efficientlabs/stratos/cli';
+import { verifyBundle } from '@efficientlabs/stratos/receipt';
+import { route } from '@efficientlabs/stratos/router';
 ```
 
 ---
