@@ -511,6 +511,7 @@ async function cmdReceipt(rest, d = {}) {
   if (sub === 'help' || sub === '-h' || sub === '--help') {
     return { code: 0, lines: [
       `${C.B}stratos receipt${C.x} ${C.d}— the signed capability-receipt proof rail${C.x}`,
+      `  ${C.g}export${C.x} <receipts.jsonl> [--out bundle.json]   Pack a signed receipt log into a portable, public-key-embedded bundle`,
       `  ${C.g}verify${C.x} <bundle.json>   Check every PQC signature + the full hash chain (OK/BROKEN + where)`,
       '',
       `  ${C.d}A bundle embeds ONLY the node's PUBLIC key, so anyone can verify it with no private key and`,
@@ -540,7 +541,35 @@ async function cmdReceipt(rest, d = {}) {
     };
   }
 
-  return { code: 1, lines: [`${C.r}Unknown receipt subcommand: ${sub}${C.x}`, `${C.d}Try: verify${C.x}`] };
+  if (sub === 'export') {
+    // Read a signed receipt JSONL (e.g. a trace's <task>.receipt.jsonl), embed THIS node's PUBLIC
+    // key, and emit a self-contained bundle anyone can `receipt verify` with no private key.
+    const src = rest[1];
+    if (!src) return { code: 1, lines: [`${C.r}usage: stratos receipt export <receipts.jsonl> [--out bundle.json]${C.x}`] };
+    const outIdx = rest.indexOf('--out');
+    const out = outIdx >= 0 ? rest[outIdx + 1] : null;
+    const keyPair = d.traceKeyPair || loadOrCreateNodeKeys();
+    let log;
+    try {
+      log = new (d.ReceiptLog || ReceiptLog)({
+        path: path.resolve(src),
+        signer: makeReceiptSigner(keyPair.privateKey),
+        verifier: makeReceiptVerifier(keyPair.publicKey),
+        nodeId: originId(keyPair.publicKey),
+      });
+    } catch (e) { return { code: 1, lines: [`${C.r}cannot read receipts: ${e.message}${C.x}`] }; }
+    if (log.length === 0) return { code: 1, lines: [`${C.r}no receipts in ${src}${C.x}`] };
+    const bundle = log.exportBundle({ publicKeyBundle: keyPair.publicKey });
+    const json = JSON.stringify(bundle, null, 2);
+    if (out) {
+      try { fs.writeFileSync(path.resolve(out), json + '\n'); }
+      catch (e) { return { code: 1, lines: [`${C.r}cannot write bundle: ${e.message}${C.x}`] }; }
+      return { code: 0, lines: [`${C.g}✓ exported${C.x} ${C.d}${bundle.receipts.length} receipt(s) → ${out} (public key embedded)${C.x}`] };
+    }
+    return { code: 0, lines: [json] };
+  }
+
+  return { code: 1, lines: [`${C.r}Unknown receipt subcommand: ${sub}${C.x}`, `${C.d}Try: export, verify${C.x}`] };
 }
 
 // ── init — establish this node's identity + a default workspace (front of the golden path) ───────

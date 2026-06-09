@@ -132,6 +132,15 @@ third party can verify it holding **only** the node's public key — no private 
 originating machine.
 
 ```sh
+# 1. Produce a signed receipt log by running a trace (writes <task>.receipt.jsonl):
+node bin/stratos.js init
+node bin/stratos.js trace my-task            # prints the path to my-task.receipt.jsonl
+
+# 2. Pack it into a self-contained, public-key-embedded bundle:
+node bin/stratos.js receipt export <the .receipt.jsonl printed above> --out bundle.json
+# ✓ exported 2 receipt(s) → bundle.json (public key embedded)
+
+# 3. A third party verifies it holding ONLY the public key in the bundle:
 node bin/stratos.js receipt verify ./bundle.json
 # ✓ OK — 2 receipt(s); every signature + the full hash chain verified with the public key only.
 ```
@@ -139,6 +148,7 @@ node bin/stratos.js receipt verify ./bundle.json
 Tamper with a single field and it **fails closed**:
 
 ```sh
+cp bundle.json tampered.json                 # then edit any receipt field (e.g. cost_units)
 node bin/stratos.js receipt verify ./tampered.json
 # ✗ BROKEN — receipt tampered (field altered) (at index 0)
 ```
