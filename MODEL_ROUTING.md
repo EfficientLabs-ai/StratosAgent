@@ -22,7 +22,7 @@ an honest, human-readable `reason` on every decision.
 - `local-fast` / `local-strong` — local open-weight (e.g. via Ollama); the router picks the *tier*, you
   pick the concrete local model behind the adapter seam.
 - `mesh` — your other machines (still sovereign), only when a real fleet exists.
-- `frontier` — your own cloud AI account (you bring the key — sometimes called "BYOK"), **opt-in only**.
+- `frontier` — your own cloud provider account (you bring the key — sometimes called "BYOK"), **opt-in only**.
 
 ### Decision order (as coded and tested)
 
