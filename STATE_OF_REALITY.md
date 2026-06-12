@@ -50,7 +50,7 @@ Total: 10 hermetic suites, all green, no network and no LLM required.
 
 | Component | Reality |
 | :-- | :-- |
-| Model router / adapter | The **decision** is real and tested; actually *calling* a model is left to you (provide a local Ollama endpoint or a BYOK provider through the adapter seam). No provider is bundled. |
+| Model router / adapter | The **decision** is real and tested; actually *calling* a model is left to you (provide a local Ollama endpoint or your own cloud provider account through the adapter seam). No provider is bundled. |
 | Self-improvement loop | Documented here as an **interface spec** (`SELF_IMPROVEMENT_LOOP.md`): the trace → eval → candidate-lesson seam is real and tested; the lesson **generator/compiler** is not in this repo. |
 | Mesh routing | The router can target a mesh tier, and `mesh-signal` reads a self-reported `fleet.json` honestly — but this repo ships **no** mesh transport. The public node runtime lives in the companion `TheAtmosphere` repo. |
 

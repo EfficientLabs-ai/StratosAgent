@@ -55,7 +55,7 @@ Privacy  >  Capability  >  Cost  >  Fallback
   `fleet.json` (it never invents peers).
 
 `src/routing/model-adapter.js` is the provider seam — `{ id, kind, call, … }` — letting you plug a
-local Ollama endpoint or a BYOK provider behind the same decision. See `MODEL_ROUTING.md` for the full
+local Ollama endpoint or your own cloud provider account behind the same decision. See `MODEL_ROUTING.md` for the full
 table.
 
 ## 5. Store — the filesystem is the contract
