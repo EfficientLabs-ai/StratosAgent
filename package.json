@@ -1,6 +1,6 @@
 {
   "name": "@efficientlabs/stratos",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "StratosAgent — the publicly-auditable operating core of a sovereign, local-first AI agent: files-first workspace/context/trace/eval, a publicly verifiable capability-receipt format + verifier, signed-skill (SKILL.md) verify-before-run, and a local-default model router.",
   "type": "module",
   "license": "BUSL-1.1",

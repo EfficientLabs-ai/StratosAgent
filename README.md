@@ -45,7 +45,7 @@ The private **learning/economic flywheel** (how the agent compounds skills and a
 the private connector/broker internals are **not** in this repo, by design — see
 [`STATE_OF_REALITY.md`](STATE_OF_REALITY.md). What *is* here is real, and the tests prove it.
 
-> Run `npm test` — **146 hermetic assertions across 12 suites**, no network and no LLM required. If any
+> Run `npm test` — **13 hermetic suites, every assertion green**, no network and no LLM required. If any
 > claim below breaks, a test goes red.
 
 ---
@@ -87,7 +87,7 @@ Everything here is deterministic and local. No key, no account, no meter.
 git clone https://github.com/EfficientLabs-ai/StratosAgent.git
 cd StratosAgent
 npm install        # one dependency: @noble/post-quantum (audited, FIPS 203/204)
-npm test           # 12 hermetic suites, all green
+npm test           # 13 hermetic suites, all green
 ```
 
 Then drive the operating core end to end — capture → trace → eval — entirely on your machine.
