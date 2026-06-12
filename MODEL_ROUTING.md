@@ -22,7 +22,7 @@ an honest, human-readable `reason` on every decision.
 - `local-fast` / `local-strong` — local open-weight (e.g. via Ollama); the router picks the *tier*, you
   pick the concrete local model behind the adapter seam.
 - `mesh` — your other machines (still sovereign), only when a real fleet exists.
-- `frontier` — BYOK cloud, **opt-in only**.
+- `frontier` — your own cloud AI account (you bring the key — sometimes called "BYOK"), **opt-in only**.
 
 ### Decision order (as coded and tested)
 
@@ -56,7 +56,7 @@ honors a liveness window (stale fleets read as unavailable) and an env hard-over
 ## The adapter seam
 
 `src/routing/model-adapter.js` is the single provider interface — `{ id, kind, call, … }` — where
-local, frontier (BYOK), and user-provided models all plug in. Selection follows the same precedence the
+local, frontier (your own account), and user-provided models all plug in. Selection follows the same precedence the
 router enforces:
 
 ```

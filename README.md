@@ -188,7 +188,7 @@ claim above what we can measure.
 | Capability gate — deny-by-default, anti path-traversal | **L5** | `test-capability-gate` |
 | Sovereign router + adapter (Privacy > Capability > Cost > Fallback) | **L5** | `test-model-router`, `test-model-adapter` |
 | Mesh signal — honest "false until a real fleet exists" | **L5** | `test-mesh-signal` |
-| Actually *calling* a model (local Ollama / BYOK provider) | **L2** | the decision + seam are here; you provide the provider |
+| Actually *calling* a model (local Ollama / your own cloud provider account) | **L2** | the decision + seam are here; you provide the provider |
 | Self-improvement loop | **L1** | the trace→eval→lesson **seam** is here ([`SELF_IMPROVEMENT_LOOP.md`](SELF_IMPROVEMENT_LOOP.md)); the **generator** is private |
 | P2P compute mesh runtime | **L0** here | router can target it; the public node runtime lives in [The Atmosphere](https://github.com/EfficientLabs-ai/TheAtmosphere) |
 | Economic / reward accounting | **L0** here | private by design — measurement before rewards |
