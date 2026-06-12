@@ -83,6 +83,7 @@ function helpText() {
     `  ${C.g}skill${C.x}     import|export|list            SKILL.md portability (untrusted-by-default)`,
     `  ${C.g}route${C.x}     "<prompt>" [--privacy]        the local-default routing decision (no call made)`,
     `  ${C.g}receipt${C.x}   verify <bundle.json>          verify a capability-receipt bundle with its public key`,
+    `  ${C.g}doctor${C.x}                                  check node health: runtime, identity, receipts, gateway`,
     `  ${C.g}version${C.x}                                  print the version`,
     '',
     `  ${C.d}Every state-changing command is capability-gated, deny-by-default. capture/trace/eval are`,
@@ -695,7 +696,107 @@ async function cmdComplete(rest, d = {}) {
 }
 
 /** The public command surface. */
-export const COMMANDS = ['init', 'workspace', 'task', 'capture', 'complete', 'trace', 'eval', 'skill', 'route', 'receipt', 'version', 'help'];
+
+// ── doctor — read-only node diagnostics (Master Build Phase 1.1; report, NEVER fix) ──────────────
+const MIN_NODE = [20, 19];
+
+/**
+ * Every check returns { name, status: 'ok'|'warn'|'fail', detail, remedy? }.
+ * Deterministic + injectable (d.env, d.fetch, d.nodeVersion, d.keysFile, d.workspacesRoot) so the
+ * suite runs hermetically. Exit code: 0 when nothing FAILS (warns are honest, not fatal).
+ */
+async function cmdDoctor(rest, d = {}) {
+  if (rest[0] === 'help' || rest[0] === '-h' || rest[0] === '--help') {
+    return { code: 0, lines: [
+      `${C.B}stratos doctor${C.x} ${C.d}— check this node's health: runtime, identity, workspace, receipts, gateway${C.x}`,
+      `  ${C.g}stratos doctor${C.x} ${C.d}(read-only — reports and suggests, never changes anything)${C.x}`,
+    ] };
+  }
+  const env = d.env || process.env;
+  const checks = [];
+  const add = (name, status, detail, remedy = null) => checks.push({ name, status, detail, remedy });
+
+  // 1 · Node.js runtime
+  const nv = (d.nodeVersion || process.version).replace(/^v/, '');
+  const [maj, min] = nv.split('.').map(Number);
+  const nodeOk = maj > MIN_NODE[0] || (maj === MIN_NODE[0] && min >= MIN_NODE[1]);
+  add('node runtime', nodeOk ? 'ok' : 'fail', `v${nv}`, nodeOk ? null : `Node ${MIN_NODE.join('.')}+ required — install via your version manager, then re-run`);
+
+  // 2 · node identity (init evidence)
+  const kf = d.keysFile || nodeKeysPath();
+  if (!fs.existsSync(kf)) {
+    add('node identity', 'fail', 'no node-keys.json — this node has no identity yet', 'run: stratos init');
+  } else {
+    try {
+      const raw = JSON.parse(fs.readFileSync(kf, 'utf8'));
+      if (raw?.publicKey) add('node identity', 'ok', didShort(originId(loadNodePublicBundle(kf))));
+      else add('node identity', 'fail', 'node-keys.json carries no public key', 'restore the file from backup or re-run stratos init in a fresh profile');
+    } catch (e) { add('node identity', 'fail', 'node-keys.json unreadable: ' + e.message, 'restore the file or remove it deliberately, then stratos init'); }
+  }
+
+  // 3 · workspace tree
+  const wsRoot = d.workspacesRoot || path.join(_ROOT, 'workspaces');
+  try {
+    const names = fs.readdirSync(wsRoot, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+    if (names.length) add('workspaces', 'ok', `${names.length} workspace(s): ${names.slice(0, 4).join(', ')}${names.length > 4 ? '…' : ''}`);
+    else add('workspaces', 'warn', 'workspace root exists but is empty', 'run: stratos init');
+  } catch { add('workspaces', 'warn', 'no workspace root yet', 'run: stratos init'); }
+
+  // 4 · receipts chain (quick fail-closed verify when one exists; absence is a state, not a failure)
+  const candidates = [path.join(_ROOT, '.stratos-profile', 'live-receipts.jsonl')];
+  const rf = (d.receiptsFile && fs.existsSync(d.receiptsFile)) ? d.receiptsFile : candidates.find((f) => fs.existsSync(f));
+  if (!rf) {
+    add('receipts', 'warn', 'no receipt chain yet', 'run a task: stratos complete <ws/proj/wf/task> "<prompt>" — receipts appear with your first traced run');
+  } else if (!fs.existsSync(kf)) {
+    add('receipts', 'warn', 'a chain exists but there is no key to verify it with', 'run: stratos init');
+  } else {
+    try {
+      const keyPair = loadOrCreateNodeKeys(kf);
+      // this repo's ReceiptLog loads the chain via its constructor path option
+      const log = new (d.ReceiptLog || ReceiptLog)({ path: rf, verifier: makeReceiptVerifier(keyPair.publicKey) });
+      const v = log.verify({ requireSig: true });
+      if (v.ok) add('receipts', 'ok', `${log.length} receipt(s), chain verifies (public key only)`);
+      else add('receipts', 'fail', `chain BROKEN${v.brokenAt != null ? ' at index ' + v.brokenAt : ''}: ${v.reason || 'signature/chain failure'}`, 'a broken chain is tamper-evidence — investigate before trusting this profile');
+    } catch (e) { add('receipts', 'fail', 'chain unreadable: ' + e.message, 'investigate the receipts file before trusting this profile'); }
+  }
+
+  // 5 · model gateway (the step-4 prerequisite the quickstart verification flagged)
+  const gw = env.STRATOS_GATEWAY_URL || null;
+  if (!gw) {
+    add('model gateway', 'warn', 'STRATOS_GATEWAY_URL is not set — `stratos complete` has nowhere to send work',
+      'point it at any OpenAI-compatible endpoint, e.g. STRATOS_GATEWAY_URL=http://127.0.0.1:11434/v1/chat/completions stratos complete <task> "<prompt>" --model gemma2:2b');
+  } else {
+    const f = d.fetch || globalThis.fetch;
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), d.timeoutMs ?? 2000);
+      // a POST with an empty body: ANY HTTP answer (even 4xx/405) proves something is listening
+      const res = await f(gw, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', signal: ctrl.signal }).finally(() => clearTimeout(t));
+      add('model gateway', 'ok', `${gw} answers (HTTP ${res.status})${res.status >= 400 ? ' — reachable; a real completion still needs a valid model (e.g. --model gemma2:2b)' : ''}`);
+    } catch (e) {
+      add('model gateway', 'fail', `${gw} unreachable: ${e.name === 'AbortError' ? 'timeout' : e.message}`, 'is the local model server (e.g. Ollama) running? start it, or fix the URL');
+    }
+  }
+
+  const fails = checks.filter((c) => c.status === 'fail').length;
+  const warns = checks.filter((c) => c.status === 'warn').length;
+  const mark = { ok: `${C.g}✓${C.x}`, warn: `${C.y}!${C.x}`, fail: `${C.r}✗${C.x}` };
+  const lines = [
+    `${C.B}stratos doctor${C.x} ${C.d}— read-only; nothing was changed${C.x}`,
+    '',
+    ...checks.flatMap((c) => [
+      ` ${mark[c.status]} ${c.name.padEnd(14)} ${c.detail}`,
+      ...(c.remedy ? [`   ${C.d}→ ${c.remedy}${C.x}`] : []),
+    ]),
+    '',
+    fails ? `${C.r}${fails} failure(s)${C.x}${warns ? `, ${warns} warning(s)` : ''} ${C.d}— fix the ✗ items first${C.x}`
+          : warns ? `${C.y}healthy with ${warns} warning(s)${C.x} ${C.d}— the warnings name your next step${C.x}`
+          : `${C.g}all checks pass${C.x}`,
+  ];
+  return { code: fails ? 1 : 0, lines, checks };
+}
+
+export const COMMANDS = ['init', 'workspace', 'task', 'capture', 'complete', 'trace', 'eval', 'skill', 'route', 'receipt', 'doctor', 'version', 'help'];
 
 export async function run(argv = [], deps = {}) {
   const d = {
@@ -728,6 +829,12 @@ export async function run(argv = [], deps = {}) {
     // complete (real local completion through the gateway)
     fetch: deps.fetch,
     selectAndComplete: deps.selectAndComplete,
+    // doctor (read-only diagnostics — all injectable for hermetic tests)
+    env: deps.env,
+    nodeVersion: deps.nodeVersion,
+    keysFile: deps.keysFile,
+    receiptsFile: deps.receiptsFile,
+    timeoutMs: deps.timeoutMs,
   };
   const [cmd, ...rest] = argv;
   switch (cmd) {
@@ -743,6 +850,7 @@ export async function run(argv = [], deps = {}) {
     case 'eval': return cmdEval(rest, d);
     case 'route': return cmdRoute(rest);
     case 'receipt': return cmdReceipt(rest, d);
+    case 'doctor': return cmdDoctor(rest, d);
     default: return { code: 1, lines: [`${C.r}Unknown command: ${cmd}${C.x}`, '', ...helpText()] };
   }
 }
