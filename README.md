@@ -11,7 +11,7 @@
 </p>
 <p>
 <img src="https://img.shields.io/badge/license-BSL%201.1-2e8bff?style=for-the-badge" alt="License" />
-<img src="https://img.shields.io/badge/tests-145%20hermetic-22c55e?style=for-the-badge" alt="Tests" />
+<img src="https://img.shields.io/badge/tests-146%20hermetic-22c55e?style=for-the-badge" alt="Tests" />
 <img src="https://img.shields.io/badge/runs-on%20your%20metal-0b0b0f?style=for-the-badge" alt="Local-first" />
 <img src="https://img.shields.io/badge/crypto-post--quantum-8b5cf6?style=for-the-badge" alt="Post-Quantum" />
 </p>
@@ -45,7 +45,7 @@ The private **learning/economic flywheel** (how the agent compounds skills and a
 the private connector/broker internals are **not** in this repo, by design — see
 [`STATE_OF_REALITY.md`](STATE_OF_REALITY.md). What *is* here is real, and the tests prove it.
 
-> Run `npm test` — **145 hermetic assertions across 11 suites**, no network and no LLM required. If any
+> Run `npm test` — **146 hermetic assertions across 12 suites**, no network and no LLM required. If any
 > claim below breaks, a test goes red.
 
 ---
@@ -87,7 +87,7 @@ Everything here is deterministic and local. No key, no account, no meter.
 git clone https://github.com/EfficientLabs-ai/StratosAgent.git
 cd StratosAgent
 npm install        # one dependency: @noble/post-quantum (audited, FIPS 203/204)
-npm test           # 11 hermetic suites, all green
+npm test           # 12 hermetic suites, all green
 ```
 
 Then drive the operating core end to end — capture → trace → eval — entirely on your machine.
@@ -132,17 +132,19 @@ third party can verify it holding **only** the node's public key — no private 
 originating machine.
 
 ```sh
-# 1. Produce a signed receipt log by running a trace (writes <task>.receipt.jsonl):
+# 1. Produce a signed receipt log by running a trace — it writes my-task.receipt.jsonl
+#    next to the trace, under .stratos-profile/workspaces/…/my-task/traces/:
 node bin/stratos.js init
-node bin/stratos.js trace my-task            # prints the path to my-task.receipt.jsonl
+node bin/stratos.js task create local/demo/flow/my-task
+node bin/stratos.js trace local/demo/flow/my-task
 
 # 2. Pack it into a self-contained, public-key-embedded bundle:
-node bin/stratos.js receipt export <the .receipt.jsonl printed above> --out bundle.json
-# ✓ exported 2 receipt(s) → bundle.json (public key embedded)
+node bin/stratos.js receipt export .stratos-profile/workspaces/local/demo/flow/my-task/traces/my-task.receipt.jsonl --out bundle.json
+# ✓ exported 1 receipt(s) → bundle.json (public key embedded)
 
 # 3. A third party verifies it holding ONLY the public key in the bundle:
 node bin/stratos.js receipt verify ./bundle.json
-# ✓ OK — 2 receipt(s); every signature + the full hash chain verified with the public key only.
+# ✓ OK — 1 receipt(s); every signature + the full hash chain verified with the public key only.
 ```
 
 Tamper with a single field and it **fails closed**:
