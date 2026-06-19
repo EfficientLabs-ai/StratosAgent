@@ -7,7 +7,7 @@
  * guard, and global invariants. State lives HERE (and in the signed event log), never in chat history.
  *
  * Pure + injectable + never throws (a malformed proposal returns {ok:false, reason}, never an
- * exception the LLM has to reason about). Mirrors the command-center skill idiom: a small loadable
+ * exception the LLM has to reason about). Follows the loadable-skill idiom: a small loadable
  * interface + a hermetic selftest() + a CLI runner.
  *
  *   import { createFSM } from './fsm.mjs'
