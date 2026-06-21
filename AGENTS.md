@@ -7,13 +7,14 @@
 
 StratosAgent is one half of a two-repo system. Keep the boundary clear in code, docs, and claims:
 
-- **StratosAgent — the EXECUTION layer.** This repo. It plans, routes, builds, and runs verifiable
-  work: the System-2 runtime, model routing logic, evaluation engine, receipts, and the agent loop.
-  It *executes*.
+- **StratosAgent — the EXECUTION layer.** This repo. It is the home of the execution-side concerns —
+  planning, model routing, the evaluation engine, receipts, and the agent loop. It *executes*. (This
+  list is SCOPE, not a capability claim: per the truth gate below, each counts as "working" only to the
+  extent a passing test demonstrates it.)
 - **TheAtmosphere — the OWNERSHIP layer.** The companion repo
   ([github.com/EfficientLabs-ai/TheAtmosphere](https://github.com/EfficientLabs-ai/TheAtmosphere)).
-  It owns the sovereign P2P compute mesh, node identity, settlement, and the public node runtime.
-  It *owns*.
+  It is the layer responsible for the sovereign P2P compute mesh, node identity, settlement, and the
+  public node runtime. It *owns*.
 
 A change here may *target* or *describe an interface to* the ownership layer, but it does not
 implement it. If a feature needs the mesh, node runtime, identity, or settlement to be real,
