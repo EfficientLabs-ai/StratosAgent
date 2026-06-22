@@ -105,6 +105,12 @@ export async function selectAndComplete({ task = {}, classHint = 'general', priv
   const prof = classProfile(classHint);
   const cloudAllowed = decision.cloud === true; // router authority: privacy/opt-in already applied
 
+  // Frontier-availability tracking for the FINAL adapter-layer override (issue #1). To disclose WHY an
+  // explicit cloud/frontier intent ended up served by a non-frontier provider, we must remember whether
+  // a frontier provider was offered at all, and whether the budget cap (not the router) stripped it.
+  const hadFrontierProvider = providers.some((p) => p.kind === FRONTIER);
+  let budgetStrippedFrontier = false;
+
   // ── PRECEDENCE STEP 1 — PRIVACY ──────────────────────────────────────────────────────────────
   // If the router did NOT allow cloud (privacy, or no opt-in), strip every frontier provider. A
   // frontier provider can NEVER be chosen when the router kept us local. This is the hard invariant.
@@ -118,8 +124,10 @@ export async function selectAndComplete({ task = {}, classHint = 'general', priv
   // An optional budget cap removes anything costlier than maxCostClass (e.g. force $0-only).
   if (budget && typeof budget.maxCostClass === 'string') {
     const cap = COST_RANK[budget.maxCostClass] ?? COST_RANK.frontier;
+    const frontierBeforeBudget = candidates.some((p) => p.kind === FRONTIER);
     const capped = candidates.filter((p) => costRank(p) <= cap);
     if (capped.length > 0) candidates = capped; // never empty the chain on a budget alone
+    budgetStrippedFrontier = frontierBeforeBudget && !candidates.some((p) => p.kind === FRONTIER);
     record({ stage: 'budget', maxCostClass: budget.maxCostClass, kept: candidates.map((p) => p.id) });
   }
 
@@ -161,6 +169,26 @@ export async function selectAndComplete({ task = {}, classHint = 'general', priv
       const result = await p.call({ ...task, classHint, tier: decision.tier });
       if (result && (result.ok === undefined || result.ok === true)) {
         record({ stage: 'call', provider: p.id, kind: p.kind, ok: true });
+
+        // ── FINAL override (issue #1) ────────────────────────────────────────────────────────────
+        // The override must name EVERY point where the requested explicit intent was dropped — not
+        // just the router's decision. The router discloses a drop IT made (e.g. privacy). But the
+        // adapter can ALSO drop an explicit cloud/frontier intent here: the router authorized cloud
+        // (decision.cloud === true) for a pinned cloud model, yet a budget cap, capability/cost/class
+        // precedence, or the simple absence of a frontier provider means a NON-frontier provider
+        // actually served. Previously `override` was copied straight from the router, so that
+        // adapter-layer downgrade was SILENT. Compute the FINAL override so the dropped frontier intent
+        // is always disclosed (a structural reason code), never silent.
+        const servedCloud = p.kind === FRONTIER; // honest: cloud only if a frontier provider served
+        let override = decision.override ?? null;
+        if (!override && decision.cloud === true && requestedModel != null && !servedCloud) {
+          override = budgetStrippedFrontier ? 'budget'
+            : (hadFrontierProvider ? 'precedence' : 'unavailable');
+          // a dedicated, scoped hop so the adapter-introduced drop is visible in the trace too.
+          record({ stage: 'override', scope: 'adapter', reason: override,
+            requestedModel, routerModel: decision.model ?? null, served: p.id, servedKind: p.kind });
+        }
+
         // The ROUTING RECEIPT: a compact, honest record of what was asked for vs what actually served,
         // the override (if the explicit choice was dropped), the cloud/privacy posture, and the full
         // fallback chain. This is what a trace/capability-receipt attests — selected provider + model +
@@ -168,19 +196,19 @@ export async function selectAndComplete({ task = {}, classHint = 'general', priv
         const receipt = {
           requestedModel,                         // caller's pinned model (null if none)
           routerModel: decision.model ?? null,    // the model the router actually honored
-          override: decision.override ?? null,    // why an explicit choice was dropped (null = none)
+          override,                               // why an explicit choice was dropped (null = none) — router OR adapter
           served: { provider: p.id, kind: p.kind },
           tier: decision.tier,
-          cloud: decision.cloud,
+          cloud: servedCloud,                     // honest: reflects the provider that ACTUALLY served
           private: isPrivate,
           fallbackChain,                          // FULL ordered chain — fallback always visible
         };
         record({ stage: 'select', provider: p.id, kind: p.kind, requestedModel,
-          routerModel: decision.model ?? null, override: decision.override ?? null,
-          cloud: decision.cloud, private: isPrivate, fallbackChain });
+          routerModel: decision.model ?? null, override,
+          cloud: servedCloud, private: isPrivate, fallbackChain });
         return {
-          result, provider: p.id, kind: p.kind, tier: decision.tier, cloud: decision.cloud,
-          reason: decision.reason, requestedModel, override: decision.override ?? null,
+          result, provider: p.id, kind: p.kind, tier: decision.tier, cloud: servedCloud,
+          reason: decision.reason, requestedModel, override,
           fallbackChain, receipt, decision, hops,
         };
       }

@@ -1,0 +1,5 @@
+Interactive focused-change session (issue #1: adapter-layer override attribution).
+Task directive was "make the change and stop." Test execution (`node run-tests.mjs`) and
+git branch/commit operations are blocked by this environment's command-approval gate, so no
+real-test receipt could be minted and the work was left uncommitted in the working tree.
+Verification was done by inspection — see the assistant's final summary.
