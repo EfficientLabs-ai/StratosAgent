@@ -81,7 +81,7 @@ const classProfile = (classHint) => CLASS_TABLE[String(classHint || 'general').t
  * @param {Array}  args.providers    pluggable adapters [{id,kind,call,capability?,costClass?,costHint?}].
  * @param {object} [args.ctx]        { hasFrontierKey?, meshAvailable? } forwarded to route().
  * @param {function}[args.log]       optional (event)=>void hop logger (defaults to a collected array).
- * @returns {Promise<{result, provider, tier, cloud, reason, decision, hops}>}
+ * @returns {Promise<{result, provider, kind, tier, cloud, reason, requestedModel, override, fallbackChain, receipt, decision, hops}>}
  */
 export async function selectAndComplete({ task = {}, classHint = 'general', privacy = false, budget = {}, providers = [], ctx = {}, log } = {}) {
   if (!Array.isArray(providers) || providers.length === 0) {
@@ -90,14 +90,26 @@ export async function selectAndComplete({ task = {}, classHint = 'general', priv
   const hops = [];
   const record = (e) => { hops.push(e); if (typeof log === 'function') log(e); };
 
+  // The caller's PINNED model (null if none). Echoed verbatim through the receipt so an explicit
+  // choice can never be silently swapped: the served provider is always disclosed alongside it.
+  const requestedModel = typeof task.model === 'string' && task.model ? task.model : null;
+
   // The request carries privacy from EITHER the explicit flag OR task.private. Then the EXISTING
   // router decides the tier + whether cloud is even allowed. We never second-guess that decision.
   const isPrivate = privacy === true || task.private === true;
   const decision = route({ ...task, private: isPrivate }, ctx);
-  record({ stage: 'route', tier: decision.tier, cloud: decision.cloud, reason: decision.reason });
+  // The route hop carries the FULL honesty disclosure: requested vs honored model + override reason.
+  record({ stage: 'route', tier: decision.tier, cloud: decision.cloud, reason: decision.reason,
+    requestedModel, routerModel: decision.model ?? null, override: decision.override ?? null });
 
   const prof = classProfile(classHint);
   const cloudAllowed = decision.cloud === true; // router authority: privacy/opt-in already applied
+
+  // Frontier-availability tracking for the FINAL adapter-layer override (issue #1). To disclose WHY an
+  // explicit cloud/frontier intent ended up served by a non-frontier provider, we must remember whether
+  // a frontier provider was offered at all, and whether the budget cap (not the router) stripped it.
+  const hadFrontierProvider = providers.some((p) => p.kind === FRONTIER);
+  let budgetStrippedFrontier = false;
 
   // ── PRECEDENCE STEP 1 — PRIVACY ──────────────────────────────────────────────────────────────
   // If the router did NOT allow cloud (privacy, or no opt-in), strip every frontier provider. A
@@ -112,8 +124,10 @@ export async function selectAndComplete({ task = {}, classHint = 'general', priv
   // An optional budget cap removes anything costlier than maxCostClass (e.g. force $0-only).
   if (budget && typeof budget.maxCostClass === 'string') {
     const cap = COST_RANK[budget.maxCostClass] ?? COST_RANK.frontier;
+    const frontierBeforeBudget = candidates.some((p) => p.kind === FRONTIER);
     const capped = candidates.filter((p) => costRank(p) <= cap);
     if (capped.length > 0) candidates = capped; // never empty the chain on a budget alone
+    budgetStrippedFrontier = frontierBeforeBudget && !candidates.some((p) => p.kind === FRONTIER);
     record({ stage: 'budget', maxCostClass: budget.maxCostClass, kept: candidates.map((p) => p.id) });
   }
 
@@ -141,7 +155,11 @@ export async function selectAndComplete({ task = {}, classHint = 'general', priv
     // stable final tiebreak: higher capability first (better default among equals).
     return capabilityOf(b) - capabilityOf(a);
   });
-  record({ stage: 'order', chain: ordered.map((p) => p.id) });
+  // The ordered survivors ARE the fallback chain. It is recorded BEFORE any call() runs, so the full
+  // multi-provider fallback path is visible even if the first provider succeeds and the rest are never
+  // touched — "what we would have fallen back to" is part of the honest record, not just what ran.
+  const fallbackChain = ordered.map((p) => p.id);
+  record({ stage: 'order', chain: fallbackChain });
 
   // ── PRECEDENCE STEP 4 — FALLBACK ──────────────────────────────────────────────────────────────
   // Try each provider in order; on a thrown error OR a falsy/{ok:false} result, log the hop and
@@ -151,7 +169,48 @@ export async function selectAndComplete({ task = {}, classHint = 'general', priv
       const result = await p.call({ ...task, classHint, tier: decision.tier });
       if (result && (result.ok === undefined || result.ok === true)) {
         record({ stage: 'call', provider: p.id, kind: p.kind, ok: true });
-        return { result, provider: p.id, kind: p.kind, tier: decision.tier, cloud: decision.cloud, reason: decision.reason, decision, hops };
+
+        // ── FINAL override (issue #1) ────────────────────────────────────────────────────────────
+        // The override must name EVERY point where the requested explicit intent was dropped — not
+        // just the router's decision. The router discloses a drop IT made (e.g. privacy). But the
+        // adapter can ALSO drop an explicit cloud/frontier intent here: the router authorized cloud
+        // (decision.cloud === true) for a pinned cloud model, yet a budget cap, capability/cost/class
+        // precedence, or the simple absence of a frontier provider means a NON-frontier provider
+        // actually served. Previously `override` was copied straight from the router, so that
+        // adapter-layer downgrade was SILENT. Compute the FINAL override so the dropped frontier intent
+        // is always disclosed (a structural reason code), never silent.
+        const servedCloud = p.kind === FRONTIER; // honest: cloud only if a frontier provider served
+        let override = decision.override ?? null;
+        if (!override && decision.cloud === true && requestedModel != null && !servedCloud) {
+          override = budgetStrippedFrontier ? 'budget'
+            : (hadFrontierProvider ? 'precedence' : 'unavailable');
+          // a dedicated, scoped hop so the adapter-introduced drop is visible in the trace too.
+          record({ stage: 'override', scope: 'adapter', reason: override,
+            requestedModel, routerModel: decision.model ?? null, served: p.id, servedKind: p.kind });
+        }
+
+        // The ROUTING RECEIPT: a compact, honest record of what was asked for vs what actually served,
+        // the override (if the explicit choice was dropped), the cloud/privacy posture, and the full
+        // fallback chain. This is what a trace/capability-receipt attests — selected provider + model +
+        // fallback chain are all observable, so a silent swap is structurally impossible to hide.
+        const receipt = {
+          requestedModel,                         // caller's pinned model (null if none)
+          routerModel: decision.model ?? null,    // the model the router actually honored
+          override,                               // why an explicit choice was dropped (null = none) — router OR adapter
+          served: { provider: p.id, kind: p.kind },
+          tier: decision.tier,
+          cloud: servedCloud,                     // honest: reflects the provider that ACTUALLY served
+          private: isPrivate,
+          fallbackChain,                          // FULL ordered chain — fallback always visible
+        };
+        record({ stage: 'select', provider: p.id, kind: p.kind, requestedModel,
+          routerModel: decision.model ?? null, override,
+          cloud: servedCloud, private: isPrivate, fallbackChain });
+        return {
+          result, provider: p.id, kind: p.kind, tier: decision.tier, cloud: servedCloud,
+          reason: decision.reason, requestedModel, override,
+          fallbackChain, receipt, decision, hops,
+        };
       }
       record({ stage: 'call', provider: p.id, kind: p.kind, ok: false, error: (result && result.error) || 'provider returned not-ok' });
     } catch (err) {
@@ -159,9 +218,11 @@ export async function selectAndComplete({ task = {}, classHint = 'general', priv
     }
   }
 
-  // Whole chain exhausted — deterministic, honest failure carrying the full hop log.
-  const e = new Error(`model-adapter: all ${ordered.length} provider(s) failed (chain: ${ordered.map((p) => p.id).join(' → ')})`);
+  // Whole chain exhausted — deterministic, honest failure carrying the full hop log + fallback chain.
+  const e = new Error(`model-adapter: all ${ordered.length} provider(s) failed (chain: ${fallbackChain.join(' → ')})`);
   e.hops = hops;
+  e.fallbackChain = fallbackChain;
+  e.requestedModel = requestedModel;
   throw e;
 }
 
