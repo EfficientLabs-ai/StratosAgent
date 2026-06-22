@@ -49,15 +49,22 @@ export function autoEscalateEnabled(env = process.env) {
 }
 
 /**
+ * Every decision echoes the caller's `requestedModel` verbatim (null when none was pinned) and the
+ * `model` actually honored. When those differ, an `override` code names WHY the explicit choice was
+ * dropped — so an explicit model can never be silently swapped or discarded without a trace. The
+ * honesty invariant (asserted by test-routing-honesty): `requestedModel` set and `model !== requestedModel`
+ * ⟹ `override` is a non-empty reason code. There is no fourth, silent outcome.
+ *
  * @param {object} request { prompt?, model?, private?, escalate? }
  * @param {object} ctx     { hasFrontierKey?, meshAvailable? }
- * @returns {{tier:string, cloud:boolean, model?:string, difficulty:number, reason:string}}
+ * @returns {{tier:string, cloud:boolean, model:?string, requestedModel:?string, override:?string, difficulty:number, reason:string}}
  */
 export function route(request = {}, ctx = {}) {
   const { prompt = '', model = null, escalate = false } = request;
   const priv = request.private === true;
   const { hasFrontierKey = false, meshAvailable = false } = ctx;
   const d = difficulty(prompt);
+  const requestedModel = typeof model === 'string' && model ? model : null;
 
   // 1. Explicit model — honor a DELIBERATE model choice (choosing a cloud model IS the opt-in).
   //    NOTE: this is for callers who pass a model on purpose (e.g. `stratos route --model`, or a
@@ -66,23 +73,24 @@ export function route(request = {}, ctx = {}) {
   //    "gpt-4o"), so treating that as opt-in would silently break sovereignty. See task-router.js §2.
   if (model) {
     if (isCloudModel(model)) {
-      if (priv) return { tier: 'local-strong', cloud: false, difficulty: d, reason: `privacy overrides explicit cloud model "${model}" — kept local` };
-      return { tier: 'frontier', cloud: true, model, difficulty: d, reason: `explicit cloud model "${model}"` };
+      // PRIVACY > explicit cloud model: the choice is DROPPED, but the override is disclosed (never silent).
+      if (priv) return { tier: 'local-strong', cloud: false, model: null, requestedModel, override: 'privacy', difficulty: d, reason: `privacy overrides explicit cloud model "${model}" — kept local` };
+      return { tier: 'frontier', cloud: true, model, requestedModel, override: null, difficulty: d, reason: `explicit cloud model "${model}"` };
     }
-    return { tier: d >= 3 ? 'local-strong' : 'local-fast', cloud: false, model, difficulty: d, reason: `explicit local model "${model}"` };
+    return { tier: d >= 3 ? 'local-strong' : 'local-fast', cloud: false, model, requestedModel, override: null, difficulty: d, reason: `explicit local model "${model}"` };
   }
 
   // 2. Privacy → never leaves THIS machine (not cloud, not mesh).
-  if (priv) return { tier: d >= 3 ? 'local-strong' : 'local-fast', cloud: false, difficulty: d, reason: 'privacy: stays on this machine' };
+  if (priv) return { tier: d >= 3 ? 'local-strong' : 'local-fast', cloud: false, model: null, requestedModel, override: null, difficulty: d, reason: 'privacy: stays on this machine' };
 
   // 3. Cloud escalation — OPT-IN ONLY: needs the flag AND a key AND real difficulty.
   if (escalate && hasFrontierKey && d >= 4) {
-    return { tier: 'frontier', cloud: true, difficulty: d, reason: `opt-in escalation (difficulty ${d})` };
+    return { tier: 'frontier', cloud: true, model: null, requestedModel, override: null, difficulty: d, reason: `opt-in escalation (difficulty ${d})` };
   }
 
   // 4. Heavy work + mesh available → your other machines (still sovereign).
-  if (d >= 4 && meshAvailable) return { tier: 'mesh', cloud: false, difficulty: d, reason: `difficulty ${d} → mesh (your hardware)` };
+  if (d >= 4 && meshAvailable) return { tier: 'mesh', cloud: false, model: null, requestedModel, override: null, difficulty: d, reason: `difficulty ${d} → mesh (your hardware)` };
 
   // 5. Default: local. Strong local for harder asks, fast local otherwise.
-  return { tier: d >= 3 ? 'local-strong' : 'local-fast', cloud: false, difficulty: d, reason: `difficulty ${d} → local (sovereign default)` };
+  return { tier: d >= 3 ? 'local-strong' : 'local-fast', cloud: false, model: null, requestedModel, override: null, difficulty: d, reason: `difficulty ${d} → local (sovereign default)` };
 }
