@@ -35,7 +35,8 @@
   ],
   "scripts": {
     "test": "node run-tests.mjs",
-    "demo": "node bin/stratos.js route \"summarize this file\""
+    "demo": "node bin/stratos.js route \"summarize this file\"",
+    "provenance": "node scripts/release-provenance.mjs"
   },
   "engines": {
     "node": ">=20.19.0"
