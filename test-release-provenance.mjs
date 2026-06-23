@@ -45,6 +45,12 @@ assert.ok(!packLeaksSecrets(['.env']).ok, 'a bare .env must be caught');
 assert.ok(!packLeaksSecrets(['config/.env.production']).ok, '.env.production must be caught');
 assert.ok(!packLeaksSecrets(['secrets/prod.pem']).ok, 'a .pem must be caught');
 assert.ok(!packLeaksSecrets(['keys/signing.key']).ok, 'a .key must be caught');
+assert.ok(!packLeaksSecrets(['.envrc']).ok, '.envrc must be caught');
+assert.ok(!packLeaksSecrets(['.npmrc']).ok, '.npmrc (can carry a token) must be caught');
+assert.ok(!packLeaksSecrets(['home/.ssh/id_rsa']).ok, 'id_rsa must be caught');
+assert.ok(!packLeaksSecrets(['.aws/credentials']).ok, 'aws credentials must be caught');
+assert.ok(!packLeaksSecrets(['cert/server.p12']).ok, 'a .p12 keystore must be caught');
+assert.ok(packLeaksSecrets(['src/credentials.js', 'README.md', 'bin/stratos.js']).ok, 'a normal credentials.js source file is NOT a leak');
 assert.ok(packLeaksSecrets([]).ok, 'empty list is trivially clean');
 
 // summarize — counts roll up; ok IFF zero FAIL (warn/skip are honest, not fatal)

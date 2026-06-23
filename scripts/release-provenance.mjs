@@ -62,7 +62,8 @@ export function meetsMinNode(current, min = MIN_NODE) {
   return true;
 }
 // A published tarball must NEVER carry private keys, .env files, or secret material.
-const SECRET_RE = /(^|\/)(\.env(\..+)?|node-keys\.json|.+\.pem|.+\.key|.+\.secret)$/i;
+// Path-separator tolerant (npm emits "/", but be defensive) and covers the common leak vectors.
+const SECRET_RE = /(^|[/\\])(\.env(\.[^/\\]+)?|\.envrc|\.npmrc|node-keys\.json|credentials|id_(rsa|dsa|ecdsa|ed25519)|.+\.(pem|key|secret|p12|pfx|keystore))$/i;
 export function packLeaksSecrets(files) {
   const offenders = (files || []).filter((f) => SECRET_RE.test(String(f)));
   return { ok: offenders.length === 0, offenders };
@@ -137,8 +138,11 @@ function checkGitTag() {
   const tagSha = sh('git', ['rev-list', '-n', '1', want]).out.trim();
   const headSha = sh('git', ['rev-parse', 'HEAD']).out.trim();
   const atHead = tagSha === headSha;
-  return { id: 'git-tag', status: PASS,
-    detail: `${want} -> ${tagSha.slice(0, 12)}${atHead ? ' (== HEAD)' : ' (not at HEAD — main has moved past the release)'}`,
+  // Tag-at-HEAD is the strong claim ("this exact commit produced the release"). A tag that exists
+  // but is not at HEAD is normal on a post-release commit, but it is NOT that claim — surface it as
+  // WARN so a clean "PROVENANCE OK" can never silently mean "checked a different commit".
+  return { id: 'git-tag', status: atHead ? PASS : WARN,
+    detail: `${want} -> ${tagSha.slice(0, 12)}${atHead ? ' (== HEAD)' : ' (NOT at HEAD — this commit is not the tagged release)'}`,
     evidence: [`git rev-list -n1 ${want} -> ${tagSha}`, `HEAD -> ${headSha}`],
     data: { want, tagSha, atHead } };
 }
@@ -241,6 +245,9 @@ function checkReceiptFlow() {
     const okClean = clean.code === 0 && /OK/.test(clean.out);
     ev.push(`receipt verify (clean) -> rc ${clean.code} ${/OK/.test(clean.out) ? 'OK' : '(no OK)'}`);
     const b = JSON.parse(fs.readFileSync(bundle, 'utf8'));
+    if (!Array.isArray(b.receipts) || b.receipts.length === 0) {
+      return { id: 'receipt-flow', status: FAIL, detail: 'exported bundle has no receipts to tamper', evidence: ev };
+    }
     b.receipts[0].cost_units = 999999;
     const tampered = path.join(tmp, 'tampered.json');
     fs.writeFileSync(tampered, JSON.stringify(b));
@@ -272,16 +279,23 @@ function main() {
   if (has('--help') || has('-h')) { console.log(HELP); return 0; }
   const quick = has('--quick');
 
+  // Any unexpected throw becomes a visible, structured FAIL — never a crash that could be mistaken
+  // for "the run didn't get that far". Honest failure beats an ambiguous stack trace.
+  const safe = (id, fn) => {
+    try { return fn(); }
+    catch (e) { return { id, status: FAIL, detail: `check threw: ${e.message}`, evidence: [String(e.stack || e).slice(0, 300)] }; }
+  };
+
   const checks = [
-    checkNode(),
-    checkPackageVersion(),
-    checkGit(),
-    checkGitTag(),
-    checkNpmPublished(has('--offline')),
-    checkNpmPack(),
-    checkCleanInstall(quick || has('--skip-install')),
-    checkTests(quick || has('--skip-tests')),
-    checkReceiptFlow(),
+    safe('node-version', checkNode),
+    safe('package-version', checkPackageVersion),
+    safe('git-commit', checkGit),
+    safe('git-tag', checkGitTag),
+    safe('npm-published', () => checkNpmPublished(has('--offline'))),
+    safe('npm-pack', checkNpmPack),
+    safe('clean-install', () => checkCleanInstall(quick || has('--skip-install'))),
+    safe('tests', () => checkTests(quick || has('--skip-tests'))),
+    safe('receipt-flow', checkReceiptFlow),
   ];
   const sum = summarize(checks);
 

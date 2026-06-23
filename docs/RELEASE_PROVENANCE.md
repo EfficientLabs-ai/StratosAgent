@@ -29,7 +29,7 @@ Exit code is **0** when no check `FAIL`s. `WARN` and `SKIP` are honest states, n
 | 1 | `node-version` | the runtime meets `engines.node` (>=20.19.0) | FAIL below the floor |
 | 2 | `package-version` | the version anchor every other check compares to | — |
 | 3 | `git-commit` | which commit this is, and whether the tree is clean | WARN if dirty |
-| 4 | `git-tag` | tag `v<version>` exists and which commit it points to | WARN if the tag is absent locally |
+| 4 | `git-tag` | tag `v<version>` exists and which commit it points to | WARN if the tag is absent locally **or not at `HEAD`** |
 | 5 | `npm-published` | the published `@latest` version equals `package.json` | FAIL on mismatch · SKIP offline |
 | 6 | `npm-pack` | the tarball ships only whitelisted files, **no secrets** | FAIL if a key/.env/.pem would ship or the version drifts |
 | 7 | `clean-install` | a freshly packed tarball installs and the binary runs | FAIL if install or `stratos --version` is wrong |
@@ -96,8 +96,9 @@ node bin/stratos.js receipt verify "$WS/t.json"; echo "exit=$?"   # ✗ BROKEN (
   Provenance is therefore proven by the *version triple* (package = tag = registry) plus *contents*
   (whitelist, no secrets) plus *behaviour* (tests, receipt fail-closed) — not by a repacked hash.
 - **The release tag may not be at `HEAD`.** On a feature branch or after a post-release merge, `git-tag`
-  reports the tag's commit and notes it is not at `HEAD`. That is expected; run the full check at the
-  tagged commit to assert "this exact commit produced the published package."
+  reports the tag's commit and **WARNs** that it is not at `HEAD` — so a clean `PROVENANCE OK` can never
+  silently mean "a different commit was checked." That state is expected day-to-day; to assert "this
+  exact commit produced the published package," run the full check at the tagged commit (expect all green).
 - **Network checks SKIP, not FAIL, when offline.** Re-run online (or in CI) to exercise `npm-published`.
 
 ## When to run it
