@@ -23,7 +23,19 @@
  *   }
  */
 
+import path from 'node:path';
+
 const STRING_LIST = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.length) : []);
+
+/**
+ * True if a path contains a `..` traversal segment. We split on BOTH separators (`/` and `\`) so a
+ * Windows-style mixed path like `/data/skills/..\secret` can't slip a `..` past a `/`-only split,
+ * then test exact segments (not a substring) so legitimate names like `..config` or `a..b` are NOT
+ * flagged, while any real parent-directory hop (`a/../b`, leading `../`, trailing `/..`, a bare `..`,
+ * or the backslash equivalents) is rejected. Because `path.posix.normalize` does not treat `\` as a
+ * separator, splitting on both here is what closes the cross-platform traversal class.
+ */
+const hasTraversalSegment = (p) => p.split(/[\\/]/).includes('..');
 
 /** Normalize a manifest's declared capabilities into a strict, deny-by-default shape. */
 export function parseCapabilities(manifest) {
@@ -66,8 +78,23 @@ export function assertStepAllowed(caps, step) {
     throw new CapabilityError(`network egress to "${host}" not in declared net allowlist [${caps.net.join(', ') || 'none'}]`);
   }
   // Filesystem target (step.path) must sit under a declared prefix.
+  // Reject ANY `..` traversal segment BEFORE the prefix check — a declared path like
+  // "/data/skills/../../etc/passwd" would otherwise startsWith("/data/skills/") yet escape the
+  // allowlist once the OS resolves it. We refuse traversal outright, then compare the normalized
+  // path so cosmetic differences (e.g. "/data/skills//a") can't smuggle a step past the gate.
   if (typeof step.path === 'string' && step.path.length) {
-    const ok = caps.fs.some((prefix) => step.path === prefix || step.path.startsWith(prefix.endsWith('/') ? prefix : prefix + '/'));
+    if (hasTraversalSegment(step.path)) {
+      throw new CapabilityError(`filesystem path "${step.path}" contains a "../" traversal segment (refused)`);
+    }
+    const normPath = path.posix.normalize(step.path);
+    // Normalization itself can surface a traversal that survives (e.g. a leading "../"); fail closed.
+    if (hasTraversalSegment(normPath)) {
+      throw new CapabilityError(`filesystem path "${step.path}" normalizes outside the allowlist (refused)`);
+    }
+    const ok = caps.fs.some((prefix) => {
+      const normPrefix = path.posix.normalize(prefix);
+      return normPath === normPrefix || normPath.startsWith(normPrefix.endsWith('/') ? normPrefix : normPrefix + '/');
+    });
     if (!ok) throw new CapabilityError(`filesystem path "${step.path}" not under declared fs prefixes [${caps.fs.join(', ') || 'none'}]`);
   }
   // Secret scope (step.secret) must be a declared NAME (values never appear here).

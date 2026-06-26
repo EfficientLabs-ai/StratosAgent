@@ -41,8 +41,14 @@ self-improvement loop is documented here as an **interface spec**, not as the ge
 | Model-adapter precedence — Privacy > Capability > Cost > Fallback (provider seam) | `test-model-adapter` |
 | Mesh signal — honest "false until a real fleet exists," never invents peers | `test-mesh-signal` |
 | Operating-tap — fail-open instrumentation that never breaks the host call | `test-operating-tap` |
+| Real local completion (gateway POST → signed receipt → persisted output → re-verify; down gateway fails closed) | `test-complete` |
+| Receipt export → verify → tamper bundle (public-key-only) | `test-receipt-export` |
+| Release-provenance gate (version / node-gate / secret-scan / summary, hermetic) | `test-release-provenance` |
+| Router honesty — explicit choice honored, privacy enforced, fallback visible, no silent swap | `test-routing-honesty`, `test-routing-honesty-adapter-override` |
+| Neuro-symbolic checks | `test-neuro-symbolic` |
+| Doctor — reports honestly, fixes nothing | `test-doctor` |
 
-Total: 10 hermetic suites, all green, no network and no LLM required.
+Total: 17 hermetic suites (174 assertions), all green, no network and no LLM required.
 
 ---
 
@@ -76,7 +82,7 @@ verifiable here; the *generation/accounting* code is not.
 
 ```bash
 npm install
-npm test          # all 10 hermetic suites — they fail if any claim above breaks
+npm test          # all 17 hermetic suites (174 assertions) — they fail if any claim above breaks
 node bin/stratos.js help
 ```
 
