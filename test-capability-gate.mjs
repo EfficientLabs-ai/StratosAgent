@@ -53,6 +53,22 @@ ok('fs path OUTSIDE declared prefix refused', () => {
 ok('path-prefix boundary is not foolable (/data/skills-evil)', () => {
   assert.strictEqual(denied(() => assertStepAllowed(caps, { action: 'read', path: '/data/skills-evil/x' })), true);
 });
+ok('fs path with "../" traversal refused (/data/skills/../../etc/passwd)', () => {
+  // startsWith("/data/skills/") would PASS this raw, but the OS resolves it to /etc/passwd —
+  // the gate must reject any ".." segment BEFORE the prefix check. Also cover the leading-,
+  // trailing-, embedded-, and bare-".." variants, plus a benign dotted name that must NOT trip.
+  assert.strictEqual(denied(() => assertStepAllowed(caps, { action: 'read', path: '/data/skills/../../etc/passwd' })), true);
+  assert.strictEqual(denied(() => assertStepAllowed(caps, { action: 'read', path: '/data/skills/../secret' })), true);
+  assert.strictEqual(denied(() => assertStepAllowed(caps, { action: 'read', path: '../etc/passwd' })), true);
+  assert.strictEqual(denied(() => assertStepAllowed(caps, { action: 'read', path: '/data/skills/sub/..' })), true);
+  assert.strictEqual(denied(() => assertStepAllowed(caps, { action: 'read', path: '..' })), true);
+  // Windows-style mixed separator: posix.normalize won't collapse "..\", so a "/"-only split would
+  // miss it — the raw-path guard must split on "\" too and refuse it.
+  assert.strictEqual(denied(() => assertStepAllowed(caps, { action: 'read', path: '/data/skills/..\\secret' })), true);
+  assert.strictEqual(denied(() => assertStepAllowed(caps, { action: 'read', path: '..\\..\\etc\\passwd' })), true);
+  // a legitimately-named file that merely contains dots is still allowed (no traversal segment):
+  assertStepAllowed(caps, { action: 'read', path: '/data/skills/..config' });
+});
 ok('declared secret scope allowed; undeclared refused', () => {
   assertStepAllowed(caps, { action: 'fetch', url: 'https://api.github.com/x', secret: 'github' });
   assert.strictEqual(denied(() => assertStepAllowed(caps, { action: 'type', secret: 'stripe' })), true);
