@@ -34,12 +34,13 @@
     "LICENSE"
   ],
   "scripts": {
+    "preflight": "node scripts/preflight-node.mjs",
     "test": "node run-tests.mjs",
     "demo": "node bin/stratos.js route \"summarize this file\"",
     "provenance": "node scripts/release-provenance.mjs"
   },
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=22.22.3 <23"
   },
   "dependencies": {
     "@noble/post-quantum": "^0.6.1"

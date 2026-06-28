@@ -8,19 +8,20 @@ on:
 
 jobs:
   test:
-    name: test · node ${{ matrix.node }} · ${{ matrix.os }}
+    name: test · node from .nvmrc · ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node: [20, 22]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
-      - run: npm install
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run preflight
       - run: npm test
       # Prove the operating loop end-to-end on every OS: trace → eval must PASS 6/6.
       - name: operating-loop smoke (trace -> eval verifies)
