@@ -93,5 +93,19 @@ await ok('the REAL binary answers `stratos doctor` (no more "Unknown command")',
   assert.match(r.stdout, /read-only/, 'states the no-fix contract');
 });
 
-assert.strictEqual(pass, 4, `expected all 4 tests, got ${pass}`);
-console.log(`\n✅ ${pass}/4 doctor tests passed — reports honestly, fixes nothing.`);
+await ok('node runtime check enforces the standardized engines band ">=22.22.3 <23", not a stale floor', async () => {
+  const dir = tmp();
+  const probe = async (v) => {
+    const r = await run(['doctor'], { keysFile: path.join(dir, 'node-keys.json'), workspacesRoot: path.join(dir, 'workspaces'), env: {}, nodeVersion: v });
+    return Object.fromEntries(r.checks.map((c) => [c.name, c]))['node runtime'];
+  };
+  assert.strictEqual((await probe('v22.22.3')).status, 'ok', 'the pinned runtime is healthy');
+  assert.strictEqual((await probe('v22.23.0')).status, 'ok', 'a later 22.x stays in-band');
+  assert.strictEqual((await probe('v22.22.2')).status, 'fail', 'one patch below the floor fails');
+  assert.strictEqual((await probe('v20.19.0')).status, 'fail', 'the pre-standardization floor no longer passes');
+  assert.strictEqual((await probe('v23.0.0')).status, 'fail', 'off the pinned 22.x line fails (engines <23)');
+  assert.match((await probe('v18.0.0')).remedy, /22\.22\.3/, 'remedy names the real floor');
+});
+
+assert.strictEqual(pass, 5, `expected all 5 tests, got ${pass}`);
+console.log(`\n✅ ${pass}/5 doctor tests passed — reports honestly, fixes nothing.`);
