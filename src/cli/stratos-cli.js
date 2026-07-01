@@ -698,7 +698,7 @@ async function cmdComplete(rest, d = {}) {
 /** The public command surface. */
 
 // ── doctor — read-only node diagnostics (Master Build Phase 1.1; report, NEVER fix) ──────────────
-const MIN_NODE = [20, 19];
+const MIN_NODE = [22, 22, 3]; // floor of package.json engines.node (">=22.22.3 <23") — keep in lockstep
 
 /**
  * Every check returns { name, status: 'ok'|'warn'|'fail', detail, remedy? }.
@@ -716,11 +716,13 @@ async function cmdDoctor(rest, d = {}) {
   const checks = [];
   const add = (name, status, detail, remedy = null) => checks.push({ name, status, detail, remedy });
 
-  // 1 · Node.js runtime
+  // 1 · Node.js runtime — engines.node is ">=22.22.3 <23": at/above the floor AND on the 22.x line
   const nv = (d.nodeVersion || process.version).replace(/^v/, '');
-  const [maj, min] = nv.split('.').map(Number);
-  const nodeOk = maj > MIN_NODE[0] || (maj === MIN_NODE[0] && min >= MIN_NODE[1]);
-  add('node runtime', nodeOk ? 'ok' : 'fail', `v${nv}`, nodeOk ? null : `Node ${MIN_NODE.join('.')}+ required — install via your version manager, then re-run`);
+  const [maj, min, pat] = nv.split('.').map((n) => parseInt(n, 10) || 0);
+  const meetsFloor = maj > MIN_NODE[0]
+    || (maj === MIN_NODE[0] && (min > MIN_NODE[1] || (min === MIN_NODE[1] && pat >= MIN_NODE[2])));
+  const nodeOk = meetsFloor && maj < 23;
+  add('node runtime', nodeOk ? 'ok' : 'fail', `v${nv}`, nodeOk ? null : `Node ${MIN_NODE.join('.')}+ on the 22.x line required (engines ">=22.22.3 <23") — switch runtimes (e.g. nvm use), then re-run`);
 
   // 2 · node identity (init evidence)
   const kf = d.keysFile || nodeKeysPath();
