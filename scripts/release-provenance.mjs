@@ -39,7 +39,9 @@ const ROOT = path.resolve(HERE, '..');
 const require = createRequire(import.meta.url);
 const pkg = require(path.join(ROOT, 'package.json'));
 const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const MIN_NODE = '20.19.0';
+// Single source of truth: the floor is parsed from package.json engines.node (e.g. ">=22.22.3 <23"),
+// so this gate can never drift from the field it claims to prove. null = missing/unparseable (checkNode FAILs).
+export const MIN_NODE = (String(pkg.engines?.node ?? '').match(/\d+\.\d+\.\d+/) || [null])[0];
 const C = { g: '\x1b[32m', y: '\x1b[33m', r: '\x1b[31m', d: '\x1b[2m', x: '\x1b[0m', B: '\x1b[1m' };
 
 export const PASS = 'PASS', FAIL = 'FAIL', WARN = 'WARN', SKIP = 'SKIP';
@@ -96,12 +98,17 @@ function findFirst(dir, re) {
   return found;
 }
 
-// 1 · Node runtime gate
+// 1 · Node runtime gate — proves the runtime against the REAL engines.node floor, fail-closed
 function checkNode() {
+  if (!MIN_NODE) {
+    return { id: 'node-version', status: FAIL,
+      detail: 'package.json engines.node is missing or unparseable — no runtime floor to prove',
+      evidence: [`package.json engines.node -> ${pkg.engines?.node ?? '(unset)'}`] };
+  }
   const ok = meetsMinNode(process.version, MIN_NODE);
   return { id: 'node-version', status: ok ? PASS : FAIL,
-    detail: `running ${process.version} (require >=${MIN_NODE})`,
-    evidence: [`process.version -> ${process.version}`, `package.json engines.node -> ${pkg.engines?.node ?? '(unset)'}`] };
+    detail: `running ${process.version} (require >=${MIN_NODE}, floor of engines.node "${pkg.engines.node}")`,
+    evidence: [`process.version -> ${process.version}`, `package.json engines.node -> ${pkg.engines.node}`] };
 }
 
 // 2 · package.json version (the anchor every other check compares against)

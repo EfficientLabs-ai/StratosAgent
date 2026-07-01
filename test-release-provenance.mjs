@@ -3,16 +3,20 @@
  *
  * The orchestration in scripts/release-provenance.mjs shells out (git/npm/the CLI) and is meant to be
  * reproduced by a reviewer, not unit-tested here. What MUST stay correct under refactor is the pure
- * logic that decides PASS/FAIL: version comparison, the Node >=20.19.0 gate, the published-tarball
- * secret scan, and the summary roll-up. Those are tested below with zero network/filesystem/process.
+ * logic that decides PASS/FAIL: version comparison, the engines-derived Node floor gate, the
+ * published-tarball secret scan, and the summary roll-up. Those are tested below with zero
+ * network/process (the only read is package.json, via the same module loader the script uses).
  *
  * Importing the script must NOT run it (the isMain guard) — that is itself part of the contract.
  */
 import assert from 'node:assert';
+import { createRequire } from 'node:module';
 import {
-  normalizeVersion, versionsMatch, meetsMinNode, packLeaksSecrets, summarize,
+  normalizeVersion, versionsMatch, meetsMinNode, packLeaksSecrets, summarize, MIN_NODE,
   PASS, FAIL, WARN, SKIP,
 } from './scripts/release-provenance.mjs';
+
+const pkg = createRequire(import.meta.url)('./package.json');
 
 // normalizeVersion — strip a leading v, trim, tolerate nullish
 assert.equal(normalizeVersion('v1.3.0'), '1.3.0');
@@ -27,7 +31,7 @@ assert.ok(!versionsMatch('1.3.0', '1.3.1'));
 assert.ok(!versionsMatch('', ''), 'two empties must NOT count as a match');
 assert.ok(!versionsMatch(undefined, '1.3.0'));
 
-// meetsMinNode — the engines.node >=20.19.0 gate, at and around the boundary
+// meetsMinNode — the pure floor comparator, at and around a boundary
 assert.ok(meetsMinNode('v20.19.0', '20.19.0'), 'exact minimum passes');
 assert.ok(meetsMinNode('v20.19.1', '20.19.0'));
 assert.ok(meetsMinNode('v20.20.0', '20.19.0'));
@@ -36,6 +40,16 @@ assert.ok(meetsMinNode('v21.0.0', '20.19.0'));
 assert.ok(!meetsMinNode('v20.18.9', '20.19.0'), 'one patch below the minor floor fails');
 assert.ok(!meetsMinNode('v20.18.0', '20.19.0'));
 assert.ok(!meetsMinNode('v18.20.0', '20.19.0'));
+
+// MIN_NODE — single-sourced from package.json engines.node, so the node-version gate can never
+// again drift from the field it claims to prove (it did once: a hardcoded 20.19.0 floor survived
+// the runtime standardization to ">=22.22.3 <23").
+assert.equal(MIN_NODE, (String(pkg.engines.node).match(/\d+\.\d+\.\d+/) || [null])[0],
+  'MIN_NODE derives from package.json engines.node');
+assert.equal(MIN_NODE, '22.22.3', 'the standardized floor is the pinned 22.22.3 runtime');
+assert.ok(meetsMinNode('v22.22.3', MIN_NODE), 'the pinned runtime passes its own floor');
+assert.ok(!meetsMinNode('v22.22.2', MIN_NODE), 'one patch below the pinned floor fails');
+assert.ok(!meetsMinNode('v20.19.0', MIN_NODE), 'the pre-standardization floor no longer passes');
 
 // packLeaksSecrets — a published tarball must never carry keys/.env/pem
 assert.ok(packLeaksSecrets(['src/cli.js', 'README.md', 'LICENSE', 'bin/stratos.js']).ok, 'a clean file list is clean');
@@ -61,4 +75,4 @@ assert.ok(s.ok, 'warn + skip alone must not fail provenance');
 assert.ok(!summarize([{ status: PASS }, { status: FAIL }]).ok, 'any FAIL fails provenance');
 assert.ok(summarize([]).ok, 'an empty check set is vacuously ok');
 
-console.log('  ✓ release-provenance: version/node-gate/secret-scan/summary logic verified (hermetic, no net/fs/proc)');
+console.log('  ✓ release-provenance: version/node-gate/secret-scan/summary logic verified (hermetic, no net/proc)');
